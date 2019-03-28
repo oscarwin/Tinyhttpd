@@ -1,9 +1,22 @@
-A mirror for tinyhttpd(Tinyhttpd非官方镜像,Fork自[sourceForge](https://sourceforge.net/projects/tiny-httpd/),仅供学习)
+Fork from  EZLippi/Tinyhttpd
+
+学习完Linux高级环境编程和Linux网络编程，选择了Tinyhttp项目来了解HTTP server的原理。fork到自己的仓库为，程序写注释。
 
 测试CGI时需要本机安装PERL，同时安装perl-cgi
 
+Tinyhttp中有个概念叫CGI，CGI即Common Gateway Interface，译作“通用网关接口”。这个技术现在基本已经是古董了，基本被淘汰了，但是我们还是有必要了解这是个什么玩意，不然有的地方提及这个概念就会不清楚。
+
+CGI为什么会叫网关呢？我们知道在网络里网关是局域网与局域网之前进行通信的关卡，网关会把本局域网的网络包转发到另一个局域网中，或者转发的下一跳路由。类似的，CGI也做了一次转发，不过这个转发不是一层不变的转发。而是把对应的请求，通过fork加exec的方式转到了另一个程序去执行某些业务逻辑，然后将数据返回。
+
+总结一句话：CGI就是web服务器接受到HTTP请求后，根据URL的内容判断要执行哪个程序，然后通过fork加exec的方式执行了另外一个程序然后返回HTTP响应的技术方法。
+
+CGI方法每来一个请求都要exec另一个程序，效率很低，因此被淘汰。在CGI的基础上，有人搞出了FastCGI，实际上就是通过进程池来缓解每次fork和销毁进程带来的开销。典型的服务器模式LAMP架构，就是一个CGI模式，Apache是web服务器，调用PHP解析器去跑一次PHP脚本。
+
+以下为原项目的README
+
 ### Prepare 
 Compile for Linux
+
 ```
  To compile for Linux:
   1) Comment out the #include <pthread.h> line.
