@@ -66,8 +66,11 @@ void accept_request(void *arg)
                        * program */
     char *query_string = NULL;
 
+    // HTTP协议的第一行是请求行，get_line读取请求行的信息
+    // 请求行示例：GET /host/index.html HTTP1.1
     numchars = get_line(client, buf, sizeof(buf));
     i = 0; j = 0;
+    // 读到第一个空格为止，读出请求的方法
     while (!ISspace(buf[i]) && (i < sizeof(method) - 1))
     {
         method[i] = buf[i];
@@ -76,60 +79,88 @@ void accept_request(void *arg)
     j=i;
     method[i] = '\0';
 
+    // strcasecmp是忽略大小写比较字符串，相同返回0，不同返回非0
+    // tinyHttp只支持了GET和POST方法
     if (strcasecmp(method, "GET") && strcasecmp(method, "POST"))
     {
         unimplemented(client);
         return;
     }
 
+    // 如果是POST请求，将CGI标志置1
     if (strcasecmp(method, "POST") == 0)
         cgi = 1;
 
     i = 0;
+    // 接着上上面读到的地方继续读，直到第一个不为空的字符，这个循环是为了消除请求的方法和URL之间的多个空格
     while (ISspace(buf[j]) && (j < numchars))
         j++;
+    // 继续读到第一个空格，或者结束，取出URL
     while (!ISspace(buf[j]) && (i < sizeof(url) - 1) && (j < numchars))
     {
         url[i] = buf[j];
         i++; j++;
     }
+    // 给字符串添加结束符
     url[i] = '\0';
 
+    // 如果是GET请求
     if (strcasecmp(method, "GET") == 0)
     {
+        // 遍历URL字符串看是否存在？这个符号
         query_string = url;
         while ((*query_string != '?') && (*query_string != '\0'))
             query_string++;
+        // 如果存在?这个符号
         if (*query_string == '?')
         {
+            // 将CGI标识置为1
             cgi = 1;
             *query_string = '\0';
+            // ？将URL分为两部分，CGI程序由？后面的字符串来表示，因此把query_string指向这个字符串
             query_string++;
         }
     }
 
+    // 把URL拼接到htdocs后面，形成新的字符串path
     sprintf(path, "htdocs%s", url);
+
+    // 如果path以/结尾，就在path后面添加index.html，表示主页文件
     if (path[strlen(path) - 1] == '/')
         strcat(path, "index.html");
+
+    // stat获取文件的属性，如果这个文件或者目录不存在，
     if (stat(path, &st) == -1) {
+        // 就把这个HTTP请求的内容全部读完，然后返回一个未找到文件的错误
         while ((numchars > 0) && strcmp("\n", buf))  /* read & discard headers */
             numchars = get_line(client, buf, sizeof(buf));
         not_found(client);
     }
+    // 如果存在
     else
     {
+        /*
+        ** st.st_mode 与 S_IFMT进行逻辑与然后与S_IFDIR进行比较，来判断是不是目录
+        ** 早期版本的linux是这么干的，现在有更方便的方法，直接使用宏：S_ISDIR(st.st_mode)来判断
+        ** 如果是个目录，在拼接一个/index.html
+        */
         if ((st.st_mode & S_IFMT) == S_IFDIR)
             strcat(path, "/index.html");
+        // 判断是否是一个可执行文件, 如果是就将CGI标志置为1
         if ((st.st_mode & S_IXUSR) ||
                 (st.st_mode & S_IXGRP) ||
                 (st.st_mode & S_IXOTH)    )
             cgi = 1;
+
         if (!cgi)
+            // 非CGI用serve_file处理
             serve_file(client, path);
         else
+            // CGI用execute_cgi来处理
             execute_cgi(client, path, method, query_string);
     }
 
+    // 处理完后关闭连接套接字
     close(client);
 }
 
@@ -319,12 +350,20 @@ int get_line(int sock, char *buf, int size)
 
     while ((i < size - 1) && (c != '\n'))
     {
+        // recv函数的四个参数为0的情况下，和read函数没有区别
+        // 循环读，每次读一个字节
         n = recv(sock, &c, 1, 0);
         /* DEBUG printf("%02X\n", c); */
         if (n > 0)
         {
+            /*
+            ** windows系统用'\r\n'表示换行
+            ** linux系统用'\n'表示换行
+            */
+            // 如果读到了回车符
             if (c == '\r')
             {
+                // MSG_PEEK用来窥视该文件描述符后面是否还有数据
                 n = recv(sock, &c, 1, MSG_PEEK);
                 /* DEBUG printf("%02X\n", c); */
                 if ((n > 0) && (c == '\n'))
@@ -336,6 +375,7 @@ int get_line(int sock, char *buf, int size)
             i++;
         }
         else
+            // 避免存在以null结尾的，强行用'\n'替换最后一个字符
             c = '\n';
     }
     buf[i] = '\0';
@@ -432,19 +472,23 @@ int startup(u_short *port)
     int on = 1;
     struct sockaddr_in name;
 
+    // 创建套接字，PF_INET其实是与 AF_INET同义
     httpd = socket(PF_INET, SOCK_STREAM, 0);
     if (httpd == -1)
         error_die("socket");
     memset(&name, 0, sizeof(name));
     name.sin_family = AF_INET;
-    name.sin_port = htons(*port);
-    name.sin_addr.s_addr = htonl(INADDR_ANY);
+    name.sin_port = htons(*port);               // 设定服务器要监听的端口号，主机序列转为网络序列
+    name.sin_addr.s_addr = htonl(INADDR_ANY);   // 设定服务器要监听的IP地址，INADDR_ANY实际为0，转为IP地址就是0.0.0.0，即监听所有的IP地址
+    // 设定套接字选项
     if ((setsockopt(httpd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on))) < 0)  
     {  
         error_die("setsockopt failed");
     }
+    // 绑定套接字
     if (bind(httpd, (struct sockaddr *)&name, sizeof(name)) < 0)
         error_die("bind");
+    // 如果传入的IP地址为0，则动态分配一个IP地址
     if (*port == 0)  /* if dynamically allocating a port */
     {
         socklen_t namelen = sizeof(name);
@@ -452,6 +496,7 @@ int startup(u_short *port)
             error_die("getsockname");
         *port = ntohs(name.sin_port);
     }
+    // 监听，backlog设置为5，同时可以完成5个TCP连接
     if (listen(httpd, 5) < 0)
         error_die("listen");
     return(httpd);
@@ -466,12 +511,17 @@ void unimplemented(int client)
 {
     char buf[1024];
 
+    // 响应报文格式
+    // 响应行：协议版本 状态码501表示还不具备请求的功能
     sprintf(buf, "HTTP/1.0 501 Method Not Implemented\r\n");
     send(client, buf, strlen(buf), 0);
     sprintf(buf, SERVER_STRING);
     send(client, buf, strlen(buf), 0);
+    // 响应报文的格式
     sprintf(buf, "Content-Type: text/html\r\n");
     send(client, buf, strlen(buf), 0);
+
+    // 输入一个空行，表示响应头已经结束，后面的是响应体，响应体是一段HTML代码
     sprintf(buf, "\r\n");
     send(client, buf, strlen(buf), 0);
     sprintf(buf, "<HTML><HEAD><TITLE>Method Not Implemented\r\n");
@@ -495,17 +545,20 @@ int main(void)
     socklen_t  client_name_len = sizeof(client_name);
     pthread_t newthread;
 
+    // startup函数中封装了socket建立连接的几个固定步骤
     server_sock = startup(&port);
     printf("httpd running on port %d\n", port);
 
     while (1)
     {
+        // 主线程accept，然后创建子进程处理IO工作，即tpc(thread per connection)模式
         client_sock = accept(server_sock,
                 (struct sockaddr *)&client_name,
                 &client_name_len);
         if (client_sock == -1)
             error_die("accept");
         /* accept_request(&client_sock); */
+        // 创建线程，accept_request函数处理逻辑，将连接套接字作为参数传入线程函数
         if (pthread_create(&newthread , NULL, (void *)accept_request, (void *)(intptr_t)client_sock) != 0)
             perror("pthread_create");
     }
