@@ -195,7 +195,9 @@ void cat(int client, FILE *resource)
 {
     char buf[1024];
 
+    // 从文件描述符读取一行文件
     fgets(buf, sizeof(buf), resource);
+    // 判断是否为文件结束
     while (!feof(resource))
     {
         send(client, buf, strlen(buf), 0);
@@ -252,11 +254,14 @@ void execute_cgi(int client, const char *path,
     int content_length = -1;
 
     buf[0] = 'A'; buf[1] = '\0';
+    // 如果是get请求，读取剩下的内容然后忽略
     if (strcasecmp(method, "GET") == 0)
         while ((numchars > 0) && strcmp("\n", buf))  /* read & discard headers */
             numchars = get_line(client, buf, sizeof(buf));
+    // 如果是post请求
     else if (strcasecmp(method, "POST") == 0) /*POST*/
     {
+        // 读取余下的信息，读取body的长度信息
         numchars = get_line(client, buf, sizeof(buf));
         while ((numchars > 0) && strcmp("\n", buf))
         {
@@ -274,7 +279,7 @@ void execute_cgi(int client, const char *path,
     {
     }
 
-
+    // 创建两个管道
     if (pipe(cgi_output) < 0) {
         cannot_execute(client);
         return;
@@ -296,10 +301,14 @@ void execute_cgi(int client, const char *path,
         char query_env[255];
         char length_env[255];
 
+        // 将子进程的标准输出重定向到写端
         dup2(cgi_output[1], STDOUT);
+        // 将标准输入重定向到读端
         dup2(cgi_input[0], STDIN);
+        // 关闭不需要的文件描述符
         close(cgi_output[0]);
         close(cgi_input[1]);
+        // 构造环境变量
         sprintf(meth_env, "REQUEST_METHOD=%s", method);
         putenv(meth_env);
         if (strcasecmp(method, "GET") == 0) {
@@ -310,21 +319,29 @@ void execute_cgi(int client, const char *path,
             sprintf(length_env, "CONTENT_LENGTH=%d", content_length);
             putenv(length_env);
         }
+        // 执行程序
         execl(path, NULL);
         exit(0);
     } else {    /* parent */
         close(cgi_output[1]);
         close(cgi_input[0]);
+        // post请求继续读取信息
         if (strcasecmp(method, "POST") == 0)
             for (i = 0; i < content_length; i++) {
+                // 读取信息
                 recv(client, &c, 1, 0);
+                // 发给子进程
                 write(cgi_input[1], &c, 1);
             }
+        // 从管道读取子进程发来的信息
         while (read(cgi_output[0], &c, 1) > 0)
+            // 发给客户端
             send(client, &c, 1, 0);
 
+        // 关闭管道
         close(cgi_output[0]);
         close(cgi_input[1]);
+        // 等待子进程退出
         waitpid(pid, &status, 0);
     }
 }
@@ -444,15 +461,20 @@ void serve_file(int client, const char *filename)
     char buf[1024];
 
     buf[0] = 'A'; buf[1] = '\0';
+    // 请求头数据读完，并忽略
     while ((numchars > 0) && strcmp("\n", buf))  /* read & discard headers */
         numchars = get_line(client, buf, sizeof(buf));
 
+    // 打开文件
     resource = fopen(filename, "r");
     if (resource == NULL)
+        // 文件找不到，返回400错误
         not_found(client);
     else
     {
+        // 构造请求头
         headers(client, filename);
+
         cat(client, resource);
     }
     fclose(resource);
